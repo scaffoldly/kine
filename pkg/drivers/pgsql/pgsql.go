@@ -32,7 +32,7 @@ var (
 	schema = []string{
 		`CREATE TABLE IF NOT EXISTS kine
  			(
-				id BIGSERIAL PRIMARY KEY,
+				id BIGINT PRIMARY KEY,
 				name text COLLATE "C",
 				created INTEGER,
 				deleted INTEGER,
@@ -48,7 +48,7 @@ var (
 		`CREATE INDEX IF NOT EXISTS kine_id_deleted_index ON kine (id,deleted)`,
 		`CREATE INDEX IF NOT EXISTS kine_prev_revision_index ON kine (prev_revision)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS kine_name_prev_revision_uindex ON kine (name, prev_revision)`,
-		`CREATE INDEX IF NOT EXISTS kine_list_query_index on kine(name, id DESC, deleted)`,
+		// `CREATE INDEX IF NOT EXISTS kine_list_query_index on kine(name, id DESC, deleted)`,
 	}
 	schemaMigrations = []string{
 		`ALTER TABLE kine ALTER COLUMN id SET DATA TYPE BIGINT, ALTER COLUMN create_revision SET DATA TYPE BIGINT, ALTER COLUMN prev_revision SET DATA TYPE BIGINT; ALTER SEQUENCE kine_id_seq AS BIGINT`,
@@ -108,7 +108,7 @@ func New(ctx context.Context, cfg *drivers.Config) (bool, server.Backend, error)
 			) AS c
 		WHERE c.deleted = 0 OR ?
 		`
-	dialect.GetSizeSQL = `SELECT pg_total_relation_size('kine')`
+	dialect.GetSizeSQL = ``
 	dialect.CompactSQL = `
 		DELETE FROM kine AS kv
 		USING	(
@@ -165,7 +165,7 @@ func New(ctx context.Context, cfg *drivers.Config) (bool, server.Backend, error)
 func setup(db *sql.DB) error {
 	logrus.Infof("Configuring database table schema and indexes, this may take a moment...")
 	var version string
-	collationSupported := true
+	collationSupported := false
 	if err := db.QueryRow("select version()").Scan(&version); err == nil && strings.Contains(strings.ToLower(version), "cockroachdb") {
 		// CockroadDB does not seem to support "C" as a collation
 		// It looks like it's using golang.org/x/text/language and ends up calling something like v, err := language.Parse("C")
@@ -208,6 +208,7 @@ func setup(db *sql.DB) error {
 }
 
 func createDBIfNotExist(dataSourceName string) error {
+	logrus.Infof("Configuring database %s", dataSourceName)
 	u, err := url.Parse(dataSourceName)
 	if err != nil {
 		return err
@@ -267,6 +268,13 @@ func prepareDSN(dataSourceName string, tlsInfo tls.Config) (string, error) {
 	// makes quoting database and schema reference the same unquoted identifier
 	// See: https://www.postgresql.org/docs/12/sql-syntax-lexical.html#:~:text=unquoted%20names%20are%20always%20folded%20to%20lower%20case
 	u.Path = strings.ToLower(u.Path)
+
+	password, err := GenerateDbConnectAdminAuthToken(u)
+	if err != nil {
+		return "", err
+	}
+
+	u.User = url.UserPassword(u.User.Username(), password)
 
 	queryMap, err := url.ParseQuery(u.RawQuery)
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/sirupsen/logrus"
+	"github.com/sony/sonyflake"
 )
 
 const (
@@ -97,6 +98,7 @@ type Generic struct {
 	TranslateErr          TranslateErr
 	ErrCode               ErrCode
 	FillRetryDuration     time.Duration
+	Flake                 *sonyflake.Sonyflake
 }
 
 func q(sql, param string, numbered bool) string {
@@ -199,6 +201,9 @@ func Open(ctx context.Context, driverName, dataSourceName string, connPoolConfig
 
 	return &Generic{
 		DB: db,
+		Flake: sonyflake.NewSonyflake(sonyflake.Settings{
+			StartTime: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+		}),
 
 		GetRevisionSQL: q(fmt.Sprintf(`
 			SELECT
@@ -246,7 +251,7 @@ func Open(ctx context.Context, driverName, dataSourceName string, connPoolConfig
 			values(?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, paramCharacter, numbered),
 
 		FillSQL: q(`INSERT INTO kine(id, name, created, deleted, create_revision, prev_revision, lease, value, old_value)
-			values(?, ?, ?, ?, ?, ?, ?, ?, ?)`, paramCharacter, numbered),
+			values(?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, paramCharacter, numbered),
 	}, err
 }
 
@@ -425,8 +430,18 @@ func (d *Generic) Insert(ctx context.Context, key string, create, delete bool, c
 		dVal = 1
 	}
 
+	if d.Flake != nil {
+		next_id, err := d.Flake.NextID()
+		if err != nil {
+			return 0, err
+		}
+		row := d.queryRow(ctx, d.FillSQL, next_id, key, cVal, dVal, createRevision, previousRevision, ttl, value, prevValue)
+		err = row.Scan(&id)
+		return id, err
+	}
+
 	if d.LastInsertID {
-		row, err := d.execute(ctx, d.InsertLastInsertIDSQL, key, cVal, dVal, createRevision, previousRevision, ttl, value, prevValue)
+		row, err := d.execute(ctx, d.FillSQL, key, cVal, dVal, createRevision, previousRevision, ttl, value, prevValue)
 		if err != nil {
 			return 0, err
 		}

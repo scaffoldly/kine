@@ -6,6 +6,7 @@ toolchain go1.22.9
 
 require (
 	github.com/Rican7/retry v0.3.1
+	github.com/aws/aws-sdk-go v1.55.5
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/jackc/pgerrcode v0.0.0-20220416144525-469b46aa5efa
 	github.com/jackc/pgx/v5 v5.7.1
@@ -18,6 +19,7 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/shengdoushi/base58 v1.0.0
 	github.com/sirupsen/logrus v1.9.3
+	github.com/sony/sonyflake v1.2.0
 	github.com/tidwall/btree v1.6.0
 	github.com/urfave/cli/v2 v2.27.5
 	go.etcd.io/etcd/api/v3 v3.5.17
@@ -53,6 +55,7 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/minio/highwayhash v1.0.2 // indirect
