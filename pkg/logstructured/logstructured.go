@@ -410,7 +410,12 @@ func (l *LogStructured) Watch(ctx context.Context, prefix string, revision int64
 
 	// include the current revision in list
 	if revision > 0 {
-		revision--
+		rev, _, err := l.log.List(ctx, prefix, "", 1, revision, false)
+		if err != nil {
+			logrus.Errorf("Failed to get %s current revision before %d: %v", prefix, revision, err)
+			cancel()
+		}
+		revision = rev
 	}
 
 	result := make(chan []*server.Event, 100)
