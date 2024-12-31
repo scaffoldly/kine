@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -173,10 +174,41 @@ func openAndTest(driverName, dataSourceName string) (*sql.DB, error) {
 	return db, nil
 }
 
+func machineIp(ctx context.Context) (net.IP, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+
+			ip := ipnet.IP.To4()
+			return ip, nil
+		}
+	}
+
+	return nil, ctx.Err()
+}
+
 func Open(ctx context.Context, driverName, dataSourceName string, connPoolConfig ConnectionPoolConfig, paramCharacter string, numbered bool, metricsRegisterer prometheus.Registerer) (*Generic, error) {
 	var (
-		db  *sql.DB
-		err error
+		db    *sql.DB
+		flake *sonyflake.Sonyflake
+		err   error
 	)
 
 	for i := 0; i < 300; i++ {
@@ -199,11 +231,25 @@ func Open(ctx context.Context, driverName, dataSourceName string, connPoolConfig
 		metricsRegisterer.MustRegister(collectors.NewDBStatsCollector(db, "kine"))
 	}
 
+	flake, err = sonyflake.New(sonyflake.Settings{
+		StartTime: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+		MachineID: func() (uint16, error) {
+			ip, err := machineIp(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return uint16(ip[2])<<8 + uint16(ip[3]), nil
+		},
+	})
+
+	if err != nil {
+		logrus.Errorf("failed to initialize sonyflake: %v", err)
+		return nil, err
+	}
+
 	return &Generic{
-		DB: db,
-		Flake: sonyflake.NewSonyflake(sonyflake.Settings{
-			StartTime: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
-		}),
+		DB:    db,
+		Flake: flake,
 
 		GetRevisionSQL: q(fmt.Sprintf(`
 			SELECT
@@ -433,6 +479,7 @@ func (d *Generic) Insert(ctx context.Context, key string, create, delete bool, c
 	if d.Flake != nil {
 		next_id, err := d.Flake.NextID()
 		if err != nil {
+			logrus.Errorf("failed to generate id: %v", err)
 			return 0, err
 		}
 		row := d.queryRow(ctx, d.FillSQL, next_id, key, cVal, dVal, createRevision, previousRevision, ttl, value, prevValue)
@@ -441,7 +488,7 @@ func (d *Generic) Insert(ctx context.Context, key string, create, delete bool, c
 	}
 
 	if d.LastInsertID {
-		row, err := d.execute(ctx, d.FillSQL, key, cVal, dVal, createRevision, previousRevision, ttl, value, prevValue)
+		row, err := d.execute(ctx, d.InsertLastInsertIDSQL, key, cVal, dVal, createRevision, previousRevision, ttl, value, prevValue)
 		if err != nil {
 			return 0, err
 		}
